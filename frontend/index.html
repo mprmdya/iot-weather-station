@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IoT Weather Station & Environment Monitor</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; }
+    body { background-color: #0b1120; color: #f8fafc; min-height: 100vh; padding: 2rem 1rem; }
+    .container { max-width: 1000px; margin: 0 auto; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; border-bottom: 1px solid #1e293b; padding-bottom: 1.25rem; }
+    .badge { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; padding: 6px 14px; border-radius: 9999px; background: rgba(56, 189, 248, 0.1); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.2); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #38bdf8; }
+    .grid-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+    .card { background: #0f172a; border: 1px solid #1e293b; border-radius: 1rem; padding: 1.25rem; }
+    .card-title { font-size: 0.8rem; color: #94a3b8; font-weight: 600; text-transform: uppercase; margin-bottom: 0.5rem; }
+    .card-value { font-size: 2rem; font-weight: 700; color: #ffffff; }
+    .unit { font-size: 1rem; color: #64748b; font-weight: 500; }
+    .chart-container { background: #0f172a; border: 1px solid #1e293b; border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.5rem; }
+    .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+    .chart-title { font-size: 1rem; font-weight: 600; color: #f1f5f9; }
+    .btn-sim { background: #1e293b; border: 1px solid #334155; color: #cbd5e1; padding: 6px 12px; border-radius: 6px; font-size: 0.75rem; cursor: pointer; transition: 0.2s; }
+    .btn-sim:hover { background: #334155; color: #fff; }
+    .footer { text-align: center; color: #64748b; font-size: 0.8rem; margin-top: 2rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1 style="font-size: 1.5rem; font-weight: 700;">🌦️ IoT Weather Station Platform</h1>
+        <p style="color: #94a3b8; font-size: 0.85rem;">Pemantau Iklim, Suhu, Kelembapan, dan Presipitasi Hujan Real-Time</p>
+      </div>
+      <div class="badge">
+        <span class="dot"></span>
+        <span id="stationStatus">Stasiun: Aktif (Python API)</span>
+      </div>
+    </header>
+
+    <!-- Ringkasan Metrik Terkini -->
+    <div class="grid-metrics">
+      <div class="card">
+        <div class="card-title">Suhu Udara</div>
+        <div class="card-value"><span id="tempNow">28.4</span> <span class="unit">°C</span></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Kelembapan Relatif</div>
+        <div class="card-value"><span id="humNow">72.0</span> <span class="unit">%</span></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Intensitas Hujan</div>
+        <div class="card-value"><span id="rainNow">15</span> <span class="unit">%</span></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Status Kondisi</div>
+        <div class="card-value" style="font-size: 1.25rem; margin-top: 0.4rem; color: #38bdf8;" id="statusNow">Berawan / Sejuk</div>
+      </div>
+    </div>
+
+    <!-- Grafik Suhu & Kelembapan (Chart.js) -->
+    <div class="chart-container">
+      <div class="chart-header">
+        <div class="chart-title">Tren Suhu & Kelembapan Real-Time</div>
+        <button class="btn-sim" onclick="simulateData()">+ Simulasi Data Baru</button>
+      </div>
+      <canvas id="tempHumChart" height="90"></canvas>
+    </div>
+
+    <!-- Grafik Presipitasi Hujan -->
+    <div class="chart-container">
+      <div class="chart-title" style="margin-bottom: 1rem;">Riwayat Intensitas Curah Hujan (%)</div>
+      <canvas id="rainChart" height="70"></canvas>
+    </div>
+
+    <div class="footer">
+      ESP8266 &bull; Flask REST API &bull; SQLite &bull; Chart.js Visualizer
+    </div>
+  </div>
+
+  <script>
+    // Data Riwayat Awal (Fallback & Real-time)
+    const labels = ['12:00', '12:05', '12:10', '12:15', '12:20', '12:25', '12:30', '12:35'];
+    const tempData = [27.8, 28.1, 28.3, 28.5, 28.2, 28.0, 28.4, 28.4];
+    const humData = [76, 75, 73, 71, 72, 74, 73, 72];
+    const rainData = [0, 0, 5, 12, 25, 18, 10, 15];
+
+    // Inisialisasi Chart.js untuk Suhu & Kelembapan
+    const ctx1 = document.getElementById('tempHumChart').getContext('2d');
+    const tempHumChart = new Chart(ctx1, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: 'Suhu (°C)',
+            data: tempData,
+            borderColor: '#f59e0b',
+            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+            tension: 0.4,
+            fill: true,
+            yAxisID: 'y'
+          },
+          {
+            label: 'Kelembapan (%)',
+            data: humData,
+            borderColor: '#38bdf8',
+            backgroundColor: 'rgba(56, 189, 248, 0.1)',
+            tension: 0.4,
+            fill: true,
+            yAxisID: 'y1'
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { labels: { color: '#cbd5e1' } }
+        },
+        scales: {
+          x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
+          y: {
+            type: 'linear',
+            position: 'left',
+            grid: { color: '#1e293b' },
+            ticks: { color: '#f59e0b' },
+            title: { display: true, text: 'Suhu (°C)', color: '#f59e0b' }
+          },
+          y1: {
+            type: 'linear',
+            position: 'right',
+            grid: { drawOnChartArea: false },
+            ticks: { color: '#38bdf8' },
+            title: { display: true, text: 'Kelembapan (%)', color: '#38bdf8' }
+          }
+        }
+      }
+    });
+
+    // Inisialisasi Bar Chart untuk Hujan
+    const ctx2 = document.getElementById('rainChart').getContext('2d');
+    const rainChart = new Chart(ctx2, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: 'Curah Hujan (%)',
+            data: rainData,
+            backgroundColor: 'rgba(16, 185, 129, 0.5)',
+            borderColor: '#10b981',
+            borderWidth: 1,
+            borderRadius: 6
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { labels: { color: '#cbd5e1' } } },
+        scales: {
+          x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
+          y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' }, max: 100 }
+        }
+      }
+    });
+
+    // Polling API Backend Python jika tersedia
+    async function fetchWeatherTelemetry() {
+      try {
+        const res = await fetch('/api/weather/latest');
+        if (res.ok) {
+          const json = await res.json();
+          if (json.data) {
+            updateDashboard(json.data.temperature, json.data.humidity, json.data.rainIntensity, json.data.rainStatus);
+          }
+        }
+      } catch (err) {
+        // Backend offline / static preview mode
+      }
+    }
+
+    function updateDashboard(temp, hum, rain, status) {
+      document.getElementById('tempNow').innerText = Number(temp).toFixed(1);
+      document.getElementById('humNow').innerText = Number(hum).toFixed(1);
+      document.getElementById('rainNow').innerText = rain;
+      document.getElementById('statusNow').innerText = status || (rain > 50 ? 'Hujan Deras' : (rain > 15 ? 'Gerimis' : 'Cerah'));
+    }
+
+    function simulateData() {
+      const now = new Date();
+      const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+      const newTemp = +(26 + Math.random() * 5).toFixed(1);
+      const newHum = +(65 + Math.random() * 20).toFixed(1);
+      const newRain = Math.floor(Math.random() * 40);
+
+      labels.push(timeStr);
+      tempData.push(newTemp);
+      humData.push(newHum);
+      rainData.push(newRain);
+
+      if (labels.length > 12) {
+        labels.shift();
+        tempData.shift();
+        humData.shift();
+        rainData.shift();
+      }
+
+      tempHumChart.update();
+      rainChart.update();
+      updateDashboard(newTemp, newHum, newRain);
+    }
+
+    setInterval(fetchWeatherTelemetry, 8000);
+  </script>
+</body>
+</html>
